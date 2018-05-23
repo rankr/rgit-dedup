@@ -1,7 +1,6 @@
 #coding: utf-8
 import os
 import zlib
-import TreeStore
 import sys
 sys.path.append('../')
 from func import *
@@ -16,7 +15,7 @@ class OBJECT:
 		self.type = type
 		self.base = base
 
-def treeFromPack(idxPath, packPath):
+def allFromPack(idxPath, packPath):
 	f_idx = open(idxPath, 'rb') 
 	f_idx.seek(4*257)
 
@@ -103,7 +102,73 @@ def treeFromPack(idxPath, packPath):
 		tar_data = zlib.compress(string[idx:])
 		return tar_data
 
-	ret = []
+	def handle_delta_2(string, idx, base_obj):
+		string = zlib.decompress(string[idx:])
+		tail_idx = len(string)
+		#read two var-len int first
+		idx = 0
+		i = 7
+		a = ord(string[idx])
+		idx += 1
+		src_size = a&0x7f
+		while a&0x80:
+			a = ord(string[idx])
+			src_size |= (a&0x7f)<<i
+			i += 7
+			idx += 1
+
+		tar_size = 0
+		i = 0
+		while True:
+			#read two var-len int first
+			a = ord(string[idx])
+			tar_size |= (a&0x7f)<<i
+			i += 7
+			idx += 1
+			if not a&(0x80):
+					break
+		#now deal with copy and insert command
+		tar_data = ''
+		while idx < tail_idx:
+			a = ord(string[idx])
+			idx += 1
+			if a&(0x80):#copy
+				offset = 0
+				copy_len = 0
+				if a&(1):
+					offset = ord(string[idx])
+					idx += 1
+				if a&(2):
+					offset |= ord(string[idx])<<8
+					idx += 1
+				if a&(4):
+					offset |= ord(string[idx])<<16
+					idx += 1
+				if a&(8):
+					offset |= ord(string[idx])<<24
+					idx += 1
+				if a&(0x10):
+					copy_len = ord(string[idx])
+					idx += 1
+				if a&(0x20):
+					copy_len |= ord(string[idx])<<8
+					idx += 1
+				if a&(0x40):
+					copy_len |= ord(string[idx])<<16
+					idx += 1
+				if copy_len==0:
+					copy_len = 0x10000
+				
+				tar_data += base_obj.data[offset : offset + copy_len]
+			else:#insert
+				tar_data += string[idx:idx+a]
+				idx += a
+			if idx > tail_idx:
+				print 'error in handle_delta, idx is bigger than string:\
+ idx is %d, tail_idx is %d'%(idx, tail_idx)
+				exit()
+		return tar_data
+	
 	for i in xrange(0, len(obj_list)):
 		#the type of base object and deltaed object is the same
 		base_obj_sha1 = ''
@@ -125,9 +190,10 @@ def treeFromPack(idxPath, packPath):
 
 			base_obj_sha1 = off2sha[obj_list[i][1] - base_real_offset]
 			obj_type = obj_hash[base_obj_sha1].type
-			if obj_type != 'tree':
-				continue
-			tar_data = handle_delta(to_process, j, obj_hash[base_obj_sha1])
+			if obj_type == 'commit' or obj_type == 'tag':
+				tar_data = handle_delta_2(to_process, j, obj_hash[base_obj_sha1])
+			else:
+				tar_data = handle_delta(to_process, j, obj_hash[base_obj_sha1])
 		elif obj_type == "ref_delta":
 			base_obj_sha1 = ''
 			for k in xrange(0, 20):
@@ -136,72 +202,29 @@ def treeFromPack(idxPath, packPath):
 					a = '0' + a
 				base_obj_sha1 = base_obj_sha1 + a
 			obj_type = obj_hash[base_obj_sha1].type
-			if obj_type != 'tree':
-				continue
-			tar_data = handle_delta(to_process, 20, obj_hash[base_obj_sha1])
+			if obj_type == 'commit' or obj_type == 'tag':
+				tar_data = handle_delta_2(to_process, 20, obj_hash[base_obj_sha1])
+			else:
+				tar_data = handle_delta(to_process, 20, obj_hash[base_obj_sha1])
 		elif obj_type == "not exists":
 			print ("Error in addObjFromPack, objType is not exists")
 			exit()
 		else:
-			if obj_type != 'tree':
-				continue
-			tar_data = to_process
+			if obj_type == 'commit' or obj_type == 'tag':
+				tar_data = zlib.decompress(to_process)
+			else:
+				tar_data = to_process
 		obj_hash[obj_list[i][0]].data = tar_data
-		obj_hash[obj_list[i][0]].type = 'tree'
+		obj_hash[obj_list[i][0]].type = obj_type
 		obj_hash[obj_list[i][0]].base = base_obj_sha1
 
 	f_pack.close()
 
+	ret = {'blob':[], 'tree':[], 'tag': [], 'commit': []}
 	for i in obj_hash:
-		if obj_hash[i].type == 'tree':
-			ret.append([i, obj_hash[i].base, obj_hash[i].data])
+		t = obj_hash[i].type 
+		if t == 'blob' or t == 'tree':
+			ret[t].append([i, obj_hash[i].base, obj_hash[i].data])
+		else:
+			ret[t].append((i, obj_hash[i].data))
 	return ret
-
-	
-def rgit_tree_store(git_repo_path, tree_store_path = '../tree_store/tree', already = []):
-	'''
-	store tree objects from git_repo_path, to csv files in tree_store_path
-	'''
-	if already:
-		ret = already
-	else:
-		pairs = idx_pack_from_repo(git_repo_path)
-		ret = []
-		for i, j in pairs:
-			ret.extend(treeFromPack(i, j))
-	
-	treestore = TreeStore.TreeStore(tree_store_path)
-	treestore.absorb(ret)
-
-def recover(sha, tree_store_path = '../tree_store/'):
-	b = TreeStore.TreeStore(tree_store_path)
-	raw = b.cat_tree(sha)
-	
-	k = raw.split('\0')
-	if len(k) == 0:
-		res = ''
-	else:
-		lines = []
-		mode, name = k[0].split(' ')
-		for i in xrange(1, len(k) - 1):
-			raw_sha = k[i][0:20]
-			s = ''
-			for j in raw_sha:
-				u = ord(j)
-				s += hex(u/16)[2:] + hex(u%16)[2:]
-			t = 'blob'
-			if 'mode' == '040000':
-				t = 'tree'
-			lines.append("%s %s %s\t%s\n"%(mode, t, s, name))
-			mode, name = k[i][20:].split(' ')
-		raw_sha = k[-1]
-		s = ''
-		for j in raw_sha:
-			u = ord(j)
-			s += hex(u/16)[2:] + hex(u%16)[2:]
-		t = 'blob'
-		if 'mode' == '040000':
-			t = 'tree'
-		lines.append("%s %s %s\t%s\n"%(mode, t, s, name))
-		res = ''.join(lines)
-	return res

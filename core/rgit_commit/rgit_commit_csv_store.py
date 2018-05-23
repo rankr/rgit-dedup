@@ -5,8 +5,6 @@ import hashlib
 import sys
 sys.path.append('../')
 from func import *
-import numpy as np
-import pandas as pd
 import zlib
 
 MSBBIT = 1<<31
@@ -21,6 +19,10 @@ class OBJECT:
 class PARSED_COMMIT:
 	def __init__(self):
 		pass
+	def show(self):
+		print (self.parents)
+		print (self.author)
+		print (self.committer)
 
 class INDEX_AND_NEW:
 	def __init__(self, file, set = {}):
@@ -214,15 +216,31 @@ def parse_commit(raw_data):
 	ret = PARSED_COMMIT()
 	raw_list = raw_data.split('\n')
 	ret.tree = raw_list[0].split(' ')[1]
-	ret.parent1 = raw_list[1].split(' ')[1]
+	ret.parents = []
+	raw_list[1].split(' ')[1]
 	temp = raw_list[2].split(' ')
-	cnt = 2
-	ret.parent2 = ''
-	if temp[0] == 'parent':
-		ret.parent2 = temp[1]
-		cnt += 1
+	cnt = 1
+	while True:
+		temp = raw_list[cnt].split(' ')
+		if temp[0] == 'parent':
+			ret.parents.append(temp[1])
+			cnt += 1
+		else:
+			break
 	begin = raw_list[cnt].find(' ')
 	end = raw_list[cnt].find('>')
+	#check if only one author and committer in commit
+	
+	a = raw_list[cnt].split(' ')[0]
+	b = raw_list[cnt+1].split(' ')[0]
+	c = raw_list[cnt+2].split(' ')[0]
+	if a!='author' or b!='committer' or c=='committer':
+		print ('failed in checking in parse_commit')
+		print ('a:',a)
+		print ('b:',b)
+		print ('c:',c)
+		exit()
+	#end check
 	ret.author = raw_list[cnt][begin+1:end+1]
 	ret.author_time = raw_list[cnt][end+2:]
 
@@ -246,8 +264,8 @@ def int2msb(a):
 			s += chr(b)
 			break
 	return s
-
-def rgit_commit_csv_store(git_repo_path, commit_store_path = '../commit_store/commit'):
+	
+def rgit_commit_csv_store(git_repo_path, commit_store_path = '../commit_store/commit', already = []):
 	'''
 	store commit objects from git_repo_path, to csv files in commit_store_path
 	'''
@@ -266,11 +284,14 @@ def rgit_commit_csv_store(git_repo_path, commit_store_path = '../commit_store/co
 		w = open(new_file_path, 'wb')
 		w.write(','.join(['hash8+1','name_email_str\n']))
 		w.close()
-
-	idx_pack_pairs = idx_pack_from_repo(git_repo_path)
-	ret = []
-	for i, j in idx_pack_pairs:
-		ret.extend(commitFromPack(i, j))
+	
+	if already:
+		ret = already
+	else:
+		idx_pack_pairs = idx_pack_from_repo(git_repo_path)
+		ret = []
+		for i, j in idx_pack_pairs:
+			ret.extend(commitFromPack(i, j))
 
 	f = open(os.path.join(commit_store_path, 'to_write'))
 	a = f.readline().split(',')
@@ -349,10 +370,12 @@ def rgit_commit_csv_store(git_repo_path, commit_store_path = '../commit_store/co
 				hash8_file.write("%s,%s\n"%(j2, parsed_commit.committer))
 				break
 			temp += 1
-		write_str = "%s,%s,%s,%s,%s,%s,%s,%s"%(\
-			parsed_commit.tree, parsed_commit.parent1, parsed_commit.parent2,\
+		
+		write_str = "%s,%s,%s,%s,%s,%s,%s"%(\
+			parsed_commit.tree, ','.join(parsed_commit.parents)+'\0',\
 			j1, parsed_commit.author_time, j2,\
 			parsed_commit.committer_time, parsed_commit.msg)
+
 		write_str = zlib.compress(write_str)
 		
 		head = int2msb(len(write_str))
@@ -483,11 +506,10 @@ def rgit_commit_csv_store_cmt_dup(git_repo_path, commit_store_path = '../commit_
 				hash8_file.write("%s,%s\n"%(j2, parsed_commit.committer))
 				break
 			temp += 1
-		write_str = "%s,%s,%s,%s,%s,%s,%s,%s"%(\
-			parsed_commit.tree, parsed_commit.parent1, parsed_commit.parent2,\
+		write_str = "%s,%s,%s,%s,%s,%s,%s"%(\
+			parsed_commit.tree, ','.join(parsed_commit.parents)+'\0',\
 			j1, parsed_commit.author_time, j2,\
 			parsed_commit.committer_time, parsed_commit.msg)
-		write_str = zlib.compress(write_str)
 		
 		head = int2msb(len(write_str))
 		content = ''.join([head, write_str])
@@ -614,8 +636,13 @@ def rgit_commit_csv_store_struc_dup(git_repo_path, commit_store_path = '../commi
 				hash8_file.write("%s,%s\n"%(j2, parsed_commit.committer))
 				break
 			temp += 1
-		write_str = "tree %s,parent %s,parent %s,%s,%s,%s,%s,%s"%(\
-			parsed_commit.tree, parsed_commit.parent1, parsed_commit.parent2,\
+		prt = '\nparent '.join(parsed_commit.parents)
+		if prt:
+			prt = 'parent ' + prt +'\0'
+		else:
+			prt = '\0'
+		write_str = "tree %s,%s,%s,%s,%s,%s,%s"%(\
+			parsed_commit.tree, prt,\
 			j1, parsed_commit.author_time, j2,\
 			parsed_commit.committer_time, parsed_commit.msg)
 			
@@ -703,8 +730,8 @@ def rgit_commit_csv_store_developer_dup(git_repo_path, commit_store_path = '../c
 		h[sha[0:2]].file.write('%s,%d,%d\n'%(sha[2:], which, offset))
 		h[sha[0:2]].set.add(sha[2:])
 
-		write_str = "%s,%s,%s,%s,%s,%s,%s,%s"%(\
-			parsed_commit.tree, parsed_commit.parent1, parsed_commit.parent2,\
+		write_str = "%s,%s,%s,%s,%s,%s,%s"%(\
+			parsed_commit.tree, ','.join(parsed_commit.parents)+'\0',\
 			parsed_commit.author, parsed_commit.author_time, parsed_commit.committer,\
 			parsed_commit.committer_time, parsed_commit.msg)
 		write_str = zlib.compress(write_str)
@@ -790,8 +817,13 @@ def rgit_commit_csv_store_all_dup(git_repo_path, commit_store_path = '../commit_
 		h[sha[0:2]].file.write('%s,%d,%d\n'%(sha[2:], which, offset))
 		h[sha[0:2]].set.add(sha[2:])
 
-		write_str = "tree %s,parent %s,parent %s,%s,%s,%s,%s,%s"%(\
-			parsed_commit.tree, parsed_commit.parent1, parsed_commit.parent2,\
+		prt = '\nparent '.join(parsed_commit.parents)
+		if prt:
+			prt = 'parent ' + prt +'\0'
+		else:
+			prt = '\0'
+		write_str = "tree %s, %s,%s,%s,%s,%s,%s"%(\
+			parsed_commit.tree, prt,\
 			parsed_commit.author, parsed_commit.author_time, parsed_commit.committer,\
 			parsed_commit.committer_time, parsed_commit.msg)
 		write_str = zlib.compress(write_str)
@@ -842,21 +874,35 @@ def commit_csv_store_rate(csv_file_list, commit_store_path = '../commit_store'):
 			no_cmpr += p
 	return after,before,no_cmpr
 	
-def clear_all_commit():
-	check_path = os.listdir('./commit_store')
+def clear_all_commit(commit_store_path = '../commit_store'):
+	check_path = os.listdir(commit_store_path)
 	if 'commit' not in check_path:
 		print 'Warning: not find directory "commit" in current directory, nothing happened'
 		exit()
 	for i in check_path:
-		a = os.path.join('./commit_store', i)
+		a = os.path.join(commit_store_path, i)
 		for j in os.listdir(a):
 			if j != '.gitkeep':
-				os.remove(os.path.join('./commit_store', i, j))
+				os.remove(os.path.join(commit_store_path, i, j))
 
-def deparse_commit(data, commit_store_path = '../commit_store/commit'):
+def deparse_commit(data, commit_store_path = '../commit_store/commit', detail = False, csv_file = ''):
 	#do not use pd.read_csv here, bcz when ',' in developer's message, there will be error
 	a = data.split(',')
-	csv_file = open('%s/rgit_commit_hash8.csv'%(commit_store_path), 'rb')
+	cnt = 1
+	parents = []
+	while True:
+		if len(a[cnt]) == 40:
+			parents.append(a[cnt])
+			cnt += 1
+		elif len(a[cnt]) == 1:#'\0'
+			cnt += 1
+			break
+		else:
+			parents.append(a[cnt][:-1])
+			cnt += 1
+			break
+	if not csv_file:
+		csv_file = open('%s/rgit_commit_hash8.csv'%(commit_store_path), 'rb')
 	line = csv_file.readline()
 	author = ''
 	committer = ''
@@ -865,34 +911,59 @@ def deparse_commit(data, commit_store_path = '../commit_store/commit'):
 		if not line:
 			break
 		line = line.strip().split(',')
-		if not author and line[0] == a[3]:
+		if not author and line[0] == a[cnt]:
 			author = ','.join(line[1:])
-		if not committer and line[0] == a[5]:
+		if not committer and line[0] == a[cnt+2]:
 			committer = ','.join(line[1:])
 			
 	csv_file.close()
 	if (not author) or (not committer):
 		print 'Error in deparse_commit: not find author or committer'
 		exit()
+
+	parent_str = ''
+	if parents:
+		parent_str = 'parent '+ '\nparent '.join(parents) + "\n"
+	msg = ','.join(a[cnt+4:])
+	ret_str = "tree %s\n%sauthor %s %s\ncommitter %s %s\n%s"%(a[0], parent_str, author, a[cnt+1], committer, a[cnt+3], msg)
 	
-	if a[2]:
-		a[2] = "parent %s\n"%(a[2])
-	return "tree %s\nparent %s\n%sauthor %s %s\ncommitter %s %s\n%s"%(a[0], a[1], a[2], author, a[4], committer, a[6], ','.join(a[7:]))
+	if not detail:
+		return ret_str
+		
+	for_case = a[cnt+3].find('>')
+	if for_case!=-1:
+		temp = a[cnt+3][for_case+1:].split('>')
+	else:
+		temp = a[cnt+3].split(' ')
+	
+	#some developer's name has '>' in it, so gmt may be the email thing...
+	gmt = int(temp[0])
+	sign = temp[1][0]
+	am = int(temp[1][1:3])
+	local_time = -1
+	if sign == '+':
+		local_time = gmt + 3600*am
+	elif sign == '-':
+		local_time = gmt - 3600*am
+	else:
+		print ("Error when processing timestamp in deparse_commit")
+		exit()
+	return ret_str, {'merge': (parent_str.count('parent')>1), 'time':gmt, 'local_time':local_time, 'author': author[:author.find('<')-1],'committer': committer[:committer.find('<')-1], 'msg': msg, }
 	
 def recover_commit(sha, commit_store_path = '../commit_store/commit'):
 	store_path = '%s/index%s'%(commit_store_path, sha[0:2])
 	if not os.path.exists(store_path):
-		print 'Error in recover_commit: not found sha %s'%(sha)
-		exit()
+		#print ('Error in recover_commit: not found sha %s'%(sha))
+		return -1
 	f = open(store_path)
 	which = -1
 	offset = -1
 	while True:
 		a = f.readline()
 		if not a:
-			print "Error in recover_commit: not found sha %s"%(sha)
+			#print ("Error in recover_commit: not found sha %s"%(sha))
 			f.close()
-			exit()
+			return -1
 		a = a.strip().split(',')
 		if a[0] == sha[2:]:
 			which = a[1]
@@ -918,7 +989,6 @@ def recover_commit(sha, commit_store_path = '../commit_store/commit'):
 	
 	return after_deparse
 	
-	
 def commit_print_stat():
 	print "this program deduplicate commits with three rules:\n"
 	print "\tRule 1. Remove the same commit from different repository"
@@ -931,3 +1001,92 @@ def commit_print_stat():
 	print "With rule 2, 3 applied, it takes %d byte storage\n"%(dirSize('./commit_store/commit_developer_dup'))
 	print "Without any rules applied, it takes %d byte storage\n"%(dirSize('./commit_store/commit_all_dup'))
 	
+def get_all(commit_store_path = '../commit_store/commit'):
+	ret = []
+	suffix = get_256suffix()
+	which_file = {}
+	for suf in suffix:
+		store_path = '%s/index%s'%(commit_store_path, suf)
+		if not os.path.exists(store_path):
+			#print ('Error in recover_commit: not found sha %s'%(sha))
+			return -1
+		f = open(store_path)
+		which = -1
+		offset = -1
+		while True:
+			a = f.readline()
+			if not a:
+				f.close()
+				break
+			a = a.strip().split(',')
+			which = a[1]
+			offset = a[2]
+			if which not in which_file:
+				which_file[which] = open('%s/rgit_commit_main%s'%(commit_store_path, which), 'rb')
+			which_file[which].seek(int(offset))
+			size = 0
+			i = 0
+			while True:
+				t = ord(which_file[which].read(1))
+				size = size + ((t & 0x7f) << (7*i))
+				if t&0x80:
+					i += 1
+				else:
+					break
+					
+			to_process = zlib.decompress(which_file[which].read(size))
+			
+			total, detail = deparse_commit(to_process, commit_store_path, detail = True)
+			ret.append((suf+a[0], total, detail))
+	
+	return ret
+	
+def get_some_commit(pool, commit_store_path = '../commit_store/commit'):
+	ret = []
+	suffix = get_256suffix()
+	which_file = {}
+	for suf in suffix:
+		store_path = '%s/index%s'%(commit_store_path, suf)
+		if not os.path.exists(store_path):
+			#print ('Error in recover_commit: not found sha %s'%(sha))
+			return -1
+		to_extract = [x[2:] for x in pool if x[0:2] == suf]
+		if not to_extract:
+			continue
+		f = open(store_path)
+		which = -1
+		offset = -1
+		extracted_num = 0
+		while True:
+			a = f.readline()
+			if not a:
+				f.close()
+				break
+			a = a.strip().split(',')
+			if a[0] not in to_extract:
+				continue
+			which = a[1]
+			offset = a[2]
+			if which not in which_file:
+				which_file[which] = open('%s/rgit_commit_main%s'%(commit_store_path, which), 'rb')
+			which_file[which].seek(int(offset))
+			size = 0
+			i = 0
+			while True:
+				t = ord(which_file[which].read(1))
+				size = size + ((t & 0x7f) << (7*i))
+				if t&0x80:
+					i += 1
+				else:
+					break
+			to_process = zlib.decompress(which_file[which].read(size))
+			
+			total, detail = deparse_commit(to_process, commit_store_path, detail = True)
+			ret.append((suf+a[0], total, detail))
+			
+			
+			extracted_num += 1
+			if extracted_num == len(to_extract):
+				break
+	
+	return ret

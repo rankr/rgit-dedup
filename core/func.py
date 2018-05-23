@@ -118,3 +118,15 @@ def idx_pack_from_repo(repo_path):
 			ret.append((os.path.join(repo_path,'.git/objects/pack',i),\
 			 os.path.join(repo_path,'.git/objects/pack',i[:-4] + '.pack')))
 	return ret
+	
+
+def get_256suffix():
+	#get hex form of 256 numbers
+	suffix = []
+	for i in xrange(0, 256):
+		temp = hex(i)
+		if len(temp)<4:
+			suffix.append('0' + temp[2])
+		else:
+			suffix.append(temp[2:])
+	return suffix

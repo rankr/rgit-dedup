@@ -158,18 +158,21 @@ def blobFromPack(idxPath, packPath):
 	return ret
 
 	
-def rgit_blob_store(git_repo_path, blob_store_path = '../blob_store/blob'):
+def rgit_blob_store(git_repo_path, blob_store_path = '../blob_store/blob', already = []):
 	'''
 	store blob objects from git_repo_path, to csv files in blob_store_path
 	'''
-	pairs = idx_pack_from_repo(git_repo_path)
-	ret = []
-	for i, j in pairs:
-		ret.extend(blobFromPack(i, j))
+	if already:
+		ret = already
+	else:
+		pairs = idx_pack_from_repo(git_repo_path)
+		ret = []
+		for i, j in pairs:
+			ret.extend(blobFromPack(i, j))
 	
 	blobstore = BlobStore.BlobStore(blob_store_path)
 	blobstore.absorb(ret)
-
-def recover(sha, blob_store_path = '../blob_store/blob'):
+	
+def recover(sha, blob_store_path = '../blob_store/'):
 	b = BlobStore.BlobStore(blob_store_path)
 	return b.cat_blob(sha)
