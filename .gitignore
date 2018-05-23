@@ -15,3 +15,8 @@ commit_store/commit/
 tag_store/tag/
 tree_store/
 projects/
+\!blob_store/.gitkeep
+\!commit_store/commit/.gitkeep
+\!tree_store/.gitkeep
+\!tag_store/tag/.gitkeep
+\!projects/.gitkeep
