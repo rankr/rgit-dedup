@@ -12,5 +12,6 @@ Desktop.ini
 # stored data
 blob_store/
 commit_store/commit/
-tag_store/
+tag_store/tag/
 tree_store/
+projects/
